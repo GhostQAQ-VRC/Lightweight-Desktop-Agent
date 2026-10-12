@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'">
+  <title>LiteAgent 桌面智能体</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="titlebar">
+    <span class="tb-app">LiteAgent 桌面智能体</span>
+    <div class="tb-controls">
+      <button type="button" id="tb-min" data-i18n-title="最小化" title="最小化"><svg viewBox="0 0 10 10"><path d="M0 5.5h10" stroke="currentColor" stroke-width="1"/></svg></button>
+      <button type="button" id="tb-max" data-i18n-title="最大化 / 还原" title="最大化 / 还原"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1"/></svg></button>
+      <button type="button" id="tb-close" data-i18n-title="关闭" title="关闭"><svg viewBox="0 0 10 10"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9" stroke="currentColor" stroke-width="1"/></svg></button>
+    </div>
+  </div>
+  <div id="app">
+    <!-- 侧边栏 -->
+    <aside id="sidebar">
+      <div class="side-head">
+        <div class="logo"><span class="logo-mark">L</span>LiteAgent</div>
+        <button id="btn-new" class="btn-new" data-i18n-title="新建对话 (Ctrl+N)" title="新建对话 (Ctrl+N)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          <span data-i18n="新对话">新对话</span>
+        </button>
+      </div>
+      <div id="conv-list"></div>
+      <div class="side-foot">
+        <button id="btn-settings" class="side-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span data-i18n="设置">设置</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- 主区 -->
+    <main id="main">
+      <header id="topbar">
+        <select id="assistant-select" data-i18n-title="当前助手(角色提示词)" title="当前助手(角色提示词)"></select>
+        <select id="mode-select" data-i18n-title="智能体模式:对话 / 受限 / 完全 / 创造" title="智能体模式:对话 / 受限 / 完全 / 创造"></select>
+        <div class="spacer"></div>
+        <button id="btn-search" class="ghost-btn" data-i18n-title="在当前对话中搜索 (Ctrl+F)" data-i18n="🔍 搜索" title="在当前对话中搜索 (Ctrl+F)">🔍 搜索</button>
+        <button id="btn-export" class="ghost-btn" data-i18n-title="导出当前对话为 Markdown" data-i18n="导出" title="导出当前对话为 Markdown">导出</button>
+        <button id="btn-panel" class="ghost-btn" data-i18n-title="切换面板 (辅助对话 / 审查 / 终端 / 浏览器)" data-i18n="▦ 面板" title="切换面板 (辅助对话 / 审查 / 终端 / 浏览器)">▦ 面板</button>
+      </header>
+
+      <div id="chat"></div>
+
+      <footer id="composer">
+        <div id="skill-bar"></div>
+        <div class="composer-box">
+          <div class="composer-head" id="composer-head">
+            <span id="composer-mini" class="composer-mini" data-i18n-title="点击展开" title="点击展开"></span>
+            <div id="composer-full" class="composer-full">
+              <div id="model-combo" data-i18n-title="选择模型(可搜索)" title="选择模型(可搜索)">
+                <button id="mc-btn" type="button"><span class="mc-ico">◆</span><span id="mc-label">未选择模型</span><span class="mc-caret">▾</span></button>
+                <div id="mc-pop" class="hidden">
+                  <div class="mc-search-row">
+                    <input id="mc-search" type="text" data-i18n-ph="搜索模型 ID / 供应商…" placeholder="搜索模型 ID / 供应商…" spellcheck="false">
+                    <span class="mc-count" id="mc-count"></span>
+                  </div>
+                  <div id="mc-list"></div>
+                </div>
+              </div>
+              <div class="spacer"></div>
+            </div>
+            <button id="composer-fold" class="fold-btn" data-i18n-title="折叠/展开模型与技能栏" title="折叠/展开模型与技能栏">▾</button>
+          </div>
+          <div id="composer-reason" class="reason-row">
+            <span class="rs-badge2" data-i18n="🧠 思考">🧠 思考</span>
+            <div id="reason-slider" data-none="1" data-i18n-title="推理强度(按所选模型能力自动识别)" title="推理强度(按所选模型能力自动识别)"></div>
+          </div>
+          <div id="attach-bar" class="hidden"></div>
+          <textarea id="input" rows="1" data-i18n-ph="给 LiteAgent 发送消息…(Enter 发送,Shift+Enter 换行;可拖入或粘贴图片/文本文件)" placeholder="给 LiteAgent 发送消息…(Enter 发送,Shift+Enter 换行;可拖入或粘贴图片/文本文件)" spellcheck="false"></textarea>
+          <div class="composer-foot">
+            <button id="btn-attach" class="attach-btn" data-i18n-title="添加图片或文本文件(也可直接拖入窗口或粘贴)" title="添加图片或文本文件(也可直接拖入窗口或粘贴)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <div class="spacer"></div>
+            <button id="btn-send" title="发送"></button>
+          </div>
+        </div>
+        <div id="usage-bar"></div>
+        <div id="status-hint"></div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- 设置弹窗挂载点 -->
+  <div id="modal-root" class="hidden"></div>
+  <div id="toast"></div>
+
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script src="vendor/hljs.js"></script>
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
