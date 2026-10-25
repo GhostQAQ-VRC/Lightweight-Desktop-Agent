@@ -34,8 +34,9 @@ const CMD_RULES = {
   ],
   // 严格档追加:提权/持久化/递归强删/下载执行/凭据操作/链接创建/编码执行
   strict: [
-    // 递归即拦(rm/rd/del/Remove-Item 全形态:缩写 -r、分写 -r -f、反序 /q /s、前缀缩写 -re*)
-    { name: '递归强删', re: /(\brm\b[^\n]{0,60}(-r\b|-rf\b|-fr\b|-re\w|--recursive\b))|(\bdel\b[^\n]{0,40}\/s\b)|(\brd\b|\brmdir\b)[^\n]{0,40}\/s\b|(\bRemove-Item\b[^\n]{0,80}-(r\b|re\w|fo\w))/i },
+    // 递归即拦(rm/rd/del/Remove-Item 全形态:缩写 -r、分写 -r -f、反序 /q /s、前缀缩写 -re*;
+    // alias 族:erase=del、ri=Remove-Item —— 全名规则字面匹配不到 alias,攻防审计2 S3 锚定;find -delete 为 posix 递归删)
+    { name: '递归强删', re: /(\brm\b[^\n]{0,60}(-r\b|-rf\b|-fr\b|-re\w|--recursive\b))|(\bdel\b|\berase\b)[^\n]{0,40}\/s\b|(\brd\b|\brmdir\b)[^\n]{0,40}\/s\b|(\bRemove-Item\b|\bri\b)[^\n]{0,80}-(r\b|re\w|fo\w)|(\bfind\b[^\n]{0,80}-delete\b)/i },
     { name: '提权执行', re: /(-Verb\s+RunAs)|(\bsudo\b)|(\bRunAs\b)|(\bStart-Process\b[^\n]{0,80}-Verb)/i },
     { name: '计划任务/服务持久化', re: /\b(schtasks|sc(\.exe)?\s+(create|delete|config)|New-Service|Register-ScheduledTask)\b/i },
     { name: '用户/用户组操作(含 net1 旁路)', re: /\bnet(1)?(\.exe)?\s+(user|localgroup)\b/i },

@@ -72,6 +72,8 @@ function defaultConfig() {
     subagents: seedSubagents(),
     teams: seedTeams(),
     mcpServers: [],
+    bridges: { ssh: [], win: [] }, // v0.52.0 连接桥:SSH(密钥登录)/ Windows(远程桌面)连接条目
+    remote: { enabled: false, port: 8629, allowApproval: false, token: '', lanIP: '', accessHost: '', tunnel: { mode: 'off', frp: { path: '', serverAddr: '', serverPort: 7000, authToken: '', remotePort: 18629 }, et: { path: '', name: '', secret: '', server: 'tcp://public.easytier.top:11010' } } }, // v0.54.0 远程控制:局域网网页控制台(token 门禁,默认关);tunnel = 出网隧道(frps 映射 / EasyTier 虚拟组网)
     groups: [{ id: 'default', name: '默认分组', icon: '📁', workspace: '' }],
     agent: { workspace: '', autoApproveFile: true, autoApproveCommand: false, maxIters: 20, shellTimeout: 120 },
     chat: { maxHistory: 40, temperature: 0.7 },
@@ -79,7 +81,7 @@ function defaultConfig() {
     proxy: { mode: 'system', rules: [], bypass: '' },
     sandbox: { fsLock: true, cmdScreen: 'strict' },
     search: { backend: 'duckduckgo', tavilyKey: '', braveKey: '', searxUrl: '', bochaKey: '' },
-    context: { strategy: 'trim', keepRecent: 8, toolResultCap: 20000, summaryPrompt: DEFAULT_SUMMARY_PROMPT },
+    context: { strategy: 'trim', keepRecent: 8, toolResultCap: 20000, summaryPrompt: DEFAULT_SUMMARY_PROMPT, compress: { enabled: true, mode: 'standard', defaultPercent: 80, gpt: { enabled: true, window: 272000, percent: 90 }, models: [] } },
     debug: { enabled: true, level: 'info' },
     usage: { prompt: 0, completion: 0, requests: 0, cached: 0, cost: 0, activeMs: 0, byModel: {}, tools: { count: 0, ms: 0 }, times: { wait: 0, think: 0, output: 0 }, parts: { system: 0, tools: 0, user: 0, injected: 0, assistant: 0, toolResult: 0, output: 0 }, daily: {} },
     reasonChoice: {},
@@ -87,9 +89,11 @@ function defaultConfig() {
     pluginsLite: {},
     memories: [],
     learnedPrompts: [],
+    agentMd: '', // Agent 规约(Agent.md,v0.57.9):用户全局规则,注入每次请求的 system
     dshPlugins: {},
-    ui: { theme: 'light', agentMode: true, mode: 'chat', activeAssistantId: 'default', activeSkillId: null, activeTeamId: 'team-4', pureTerminal: false, perfLowMemory: false, glass: false, transparent: false, bgImage: '', sliderZoom: 1, sliderAlign: 'center', sidebarWidth: 264, panelWidth: 400, usageBarStyle: 'compact', forceLowPowerGpu: false, softwareRender: false },
+    ui: { theme: 'light', agentMode: true, mode: 'chat', activeAssistantId: 'default', activeSkillId: null, activeTeamId: 'team-4', pureTerminal: false, perfLowMemory: false, glass: false, transparent: false, bgImage: '', sliderZoom: 1, sliderAlign: 'center', sidebarWidth: 264, panelWidth: 400, usageBarStyle: 'compact', forceLowPowerGpu: false, softwareRender: false, codeColors: { tag: '#5b9bff', attr: '#d9a441', str: '#4fb96a', com: '#8b949e' } },
     imageGen: { enabled: false, providers: [], providerId: '', model: '', size: '1024x1024', autoBridge: true },
+    blender: { enabled: false, viewportPanel: false, httpPort: 9877, addonPort: 9876, blenderExe: '', workDir: '', holder: '' }, // v0.55.0 Blender 建模工具链(15 工具 + 后端托管 9877 + addon 9876;viewportPanel = 右侧面板「Blender 视口」标签,默认关)
     dev: { terminalCorner: 'bottom-right', terminalShell: 'powershell', memory: false, learning: false, dshHost: false },
     general: { language: 'zh-CN', hardwareAccel: true, taskNotify: true, soundNotify: true, closeToTray: false, keepAwake: false },
     lastModel: null,
@@ -106,15 +110,27 @@ function init(app) {
   try { loaded = JSON.parse(fs.readFileSync(dirs.configFile, 'utf8')); } catch (_) { /* 首次运行 */ }
   const def = defaultConfig();
   config = { ...def, ...(loaded || {}) };
-  for (const k of ['agent', 'chat', 'ui', 'security', 'context', 'debug', 'usage', 'reasonChoice', 'pluginsLite', 'proxy', 'sandbox', 'search', 'dev', 'general', 'dshPlugins']) {
+  for (const k of ['agent', 'chat', 'ui', 'security', 'context', 'debug', 'usage', 'reasonChoice', 'pluginsLite', 'proxy', 'sandbox', 'search', 'dev', 'general', 'dshPlugins', 'bridges', 'remote', 'blender']) {
     config[k] = { ...def[k], ...((loaded && loaded[k]) || {}) };
   }
+  // 上下文压缩策略(v0.56.0):旧配置无 compress 字段时补默认;嵌套 gpt 也要合并,避免只读到一半
+  const loadedCompress = (config.context && config.context.compress) || {};
+  const defCompress = def.context.compress;
+  config.context.compress = {
+    ...defCompress,
+    ...loadedCompress,
+    gpt: { ...defCompress.gpt, ...((loadedCompress && loadedCompress.gpt) || {}) },
+    models: Array.isArray(loadedCompress.models) ? loadedCompress.models : [],
+  };
   // 模式迁移:仅当旧配置存在 agentMode 开关时映射(false→对话,true→受限);全新安装保持默认对话模式
   const loadedUi = (loaded && loaded.ui) || {};
   if (!loadedUi.mode && loadedUi.agentMode !== undefined) {
     config.ui.mode = loadedUi.agentMode === false ? 'chat' : 'restricted';
   }
   if (!Array.isArray(config.providers) || !config.providers.length) config.providers = seedProviders();
+  if (!Array.isArray(config.removedPresets)) config.removedPresets = [];
+  // Agent 规约:老配置无此字段时补空串(统一为字符串,避免 null 拼进提示词)
+  if (typeof config.agentMd !== 'string') config.agentMd = '';
   // 迁移:老版本配置没有助手/技能字段时补默认
   if (!Array.isArray(config.assistants) || !config.assistants.length) config.assistants = DEFAULT_ASSISTANTS.map((a) => ({ ...a }));
   if (!Array.isArray(config.skills)) config.skills = DEFAULT_SKILLS.map((s) => ({ ...s }));
@@ -131,7 +147,10 @@ function init(app) {
   if (!Array.isArray(config.learnedPrompts)) config.learnedPrompts = [];
   if (!(config.dshPlugins && typeof config.dshPlugins === 'object' && !Array.isArray(config.dshPlugins))) config.dshPlugins = {}; // DSH 代码插件载入开关(实验性)
   // 账号登录供应商(OAuth 预置):新版本自动补进旧配置 —— 不然老用户根本看不到登录入口;未登录零成本,不需要可删
+  // v0.57.7:用户主动删过的预置不再复活(记在 config.removedPresets),否则删了下次启动又回来
+  if (!Array.isArray(config.removedPresets)) config.removedPresets = [];
   for (const preset of PRESETS.filter((p) => p.oauth)) {
+    if (config.removedPresets.includes(preset.id)) continue;
     if (!config.providers.some((x) => x.id === preset.id)) {
       config.providers.push({ ...preset, models: [...(preset.models || [])], apiKey: '' });
     }
@@ -175,7 +194,7 @@ function saveNow() {
 function updateConfig(patch) {
   patch = patch || {};
   for (const [k, v] of Object.entries(patch)) {
-    if (['agent', 'chat', 'ui', 'security', 'context', 'debug', 'usage', 'reasonChoice', 'pluginsLite', 'proxy', 'sandbox', 'search', 'dev', 'general', 'dshPlugins'].includes(k) && v && typeof v === 'object' && !Array.isArray(v)) {
+    if (['agent', 'chat', 'ui', 'security', 'context', 'debug', 'usage', 'reasonChoice', 'pluginsLite', 'proxy', 'sandbox', 'search', 'dev', 'general', 'dshPlugins', 'bridges', 'remote', 'blender'].includes(k) && v && typeof v === 'object' && !Array.isArray(v)) {
       config[k] = { ...config[k], ...v };
     } else {
       config[k] = v;
@@ -194,7 +213,15 @@ function updateConfig(patch) {
 
 const convFile = (id) => path.join(dirs.convDir, `${id}.json`);
 
+// 会话 ID 白名单:渲染端 uid()、远程 r- 前缀、fork uid 均为 [A-Za-z0-9_-]。
+// 挡路径穿越(../、盘符、分隔符)——remote HTTP 面(/api/send?convId=)与 IPC 直通本层,是网络攻击的最后一道防线
+const CONV_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+function validConvId(id) {
+  return typeof id === 'string' && CONV_ID_RE.test(id);
+}
+
 function createConv(id, groupId) {
+  if (id && !validConvId(id)) throw new Error(`非法会话 ID: ${String(id).slice(0, 40)}`);
   const conv = {
     id: id || uid(),
     groupId: groupId || 'default',
@@ -209,7 +236,7 @@ function createConv(id, groupId) {
 }
 
 function getConv(id) {
-  if (!id) return null;
+  if (!id || !validConvId(id)) return null;
   if (convCache.has(id)) return convCache.get(id);
   try {
     const conv = JSON.parse(fs.readFileSync(convFile(id), 'utf8'));
@@ -221,6 +248,7 @@ function getConv(id) {
 }
 
 function saveConv(conv) {
+  if (!conv || !validConvId(conv.id)) return; // 非法 id 一律拒写(防穿越落盘)
   conv.updatedAt = Date.now();
   convCache.set(conv.id, conv);
   try { fs.writeFileSync(convFile(conv.id), JSON.stringify(conv), 'utf8'); } catch (_) { /* ignore */ }
@@ -232,19 +260,31 @@ function listConvs() {
   const list = [];
   for (const f of files) {
     const c = getConv(f.slice(0, -5));
-    if (c) list.push({ id: c.id, groupId: c.groupId || 'default', title: c.title, updatedAt: c.updatedAt, count: (c.messages || []).length, usage: c.usage || null, ctx: c.ctx || null });
+    if (!c) continue;
+    // 尾部状态(v0.54.5 侧栏状态色):error 块 → 异常;durationMs → 完成;尾部是 user(待回复) → 无状态
+    let lastStatus = null;
+    let lastMs = null;
+    const msgs = c.messages || [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role !== 'assistant') break;
+      lastStatus = (msgs[i].blocks || []).some((b) => b.type === 'error') ? 'error' : 'done';
+      lastMs = Number.isFinite(msgs[i].durationMs) ? msgs[i].durationMs : null;
+      break;
+    }
+    list.push({ id: c.id, groupId: c.groupId || 'default', title: c.title, updatedAt: c.updatedAt, count: (c.messages || []).length, usage: c.usage || null, ctx: c.ctx || null, lastStatus, lastMs });
   }
   list.sort((a, b) => b.updatedAt - a.updatedAt);
   return list;
 }
 
 function deleteConv(id) {
+  if (!validConvId(id)) return; // 非法 id 拒删(防穿越删除任意 JSON)
   convCache.delete(id);
   try { fs.unlinkSync(convFile(id)); } catch (_) { /* ignore */ }
 }
 
 function renameConv(id, title) {
-  const c = getConv(id);
+  const c = getConv(id); // getConv 已含白名单
   if (c) {
     c.title = String(title || '').slice(0, 60) || '新对话';
     saveConv(c);
@@ -254,8 +294,9 @@ function renameConv(id, title) {
 
 // 对话分支存储模型:消息的 variants = 除自身外的全部兄弟回复(按时间序),
 // pos = 本消息在完整时间序中的位次(无环,可直接 JSON 落盘)。
-// 切换分支:messages[index] 与相邻位次的变体互换(循环)。
-function switchBranch(conv, index, dir) {
+// 切换分支:messages[index] 与相邻位次的变体互换(循环);dir = ±1 逐步切换,
+// to = 直接切到指定位次(分支管理面板点击节点直达,v0.54.5)。
+function switchBranch(conv, index, dir, to) {
   const m = conv.messages && conv.messages[index];
   if (!m || !Array.isArray(m.variants) || !m.variants.length) return conv;
   const pos = Number.isInteger(m.pos) ? m.pos : m.variants.length;
@@ -263,7 +304,7 @@ function switchBranch(conv, index, dir) {
   seq.splice(Math.min(pos, seq.length), 0, m);
   const total = seq.length;
   if (total < 2) return conv;
-  const next = (pos + (dir >= 0 ? 1 : -1) + total) % total;
+  const next = Number.isInteger(to) ? Math.min(Math.max(0, to), total - 1) : (pos + (dir >= 0 ? 1 : -1) + total) % total;
   const target = seq[next];
   if (!target || target === m) return conv;
   target.variants = seq.filter((x) => x !== target);
@@ -358,6 +399,7 @@ module.exports = {
   pluginsDir,
   baseDir,
   updateConfig,
+  saveNow,
   createConv,
   getConv,
   saveConv,

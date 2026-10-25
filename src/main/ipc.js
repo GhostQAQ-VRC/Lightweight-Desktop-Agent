@@ -16,6 +16,8 @@ const security = require('./security')
 const imagegen = require('./imagegen');
 const debuglog = require('./debuglog');
 const modelCaps = require('./modelCaps');
+const compressPolicy = require('./compress.js');
+const modeldb = require('./modeldb');
 const pluginHost = require('./pluginHost');
 const specialty = require('./specialty');
 const attachments = require('./attachments');
@@ -25,6 +27,7 @@ const terminal = require('./terminal');
 const datapath = require('./datapath');
 const appower = require('./appower');
 const traymgr = require('./traymgr');
+const blender = require('./blender');
 
 const streams = new Map(); // streamId → { ac, decisions, asks, convId }
 
@@ -34,6 +37,12 @@ function register(store) {
   ipcMain.handle('config:set', (e, patch) => {
     const cfg = store.updateConfig(patch || {});
     debuglog.info(store, 'config', 'config:set', { keys: Object.keys(patch || {}) });
+    // 远程控制(v0.54.0):启停/端口/授权变化 → 实时应用(开启且无 token 时在此生成并落盘)
+    if (patch && patch.remote) {
+      try { require('./remote').applyConfig(cfg, { store, streams, chatSendCore }); } catch (err) {
+        debuglog.warn(store, 'remote', 'apply-fail', { message: String(err.message || err).slice(0, 200) });
+      }
+    }
     // 代理设置变化 → 立即应用到 session(下一次请求生效)
     if (patch && patch.proxy) proxy.applyProxy(store).catch((err) => {
       debuglog.warn(store, 'proxy', 'apply-failed', { message: String(err.message || err).slice(0, 200) });
@@ -53,6 +62,12 @@ function register(store) {
     // DSH 运行时层总开关(实验性,默认关)
     if (patch && patch.dev && patch.dev.dshHost !== undefined) {
       try { dshHost.applyConfigChange(store); } catch (_) { /* ignore */ }
+    }
+    // Blender 建模工具链(v0.55.0):开关/端口变化 → 实时应用(启停后端/看护/选中桥)
+    if (patch && patch.blender) {
+      try { blender.applyConfig(store); } catch (err) {
+        debuglog.warn(store, 'blender', 'apply-fail', { message: String(err.message || err).slice(0, 200) });
+      }
     }
     // 常规设置(v0.40):保持唤醒即时生效;托盘开关同步托盘生命周期
     if (patch && patch.general) {
@@ -134,6 +149,25 @@ function register(store) {
     v.webContents.on('did-fail-load', (_e, code, desc) => { if (code !== -3) panelViewSend(tabId, { type: 'did-fail-load', code, desc }); });
     v.webContents.on('did-finish-load', () => panelViewSend(tabId, { type: 'did-finish-load' }));
     v.webContents.on('page-title-updated', (_e, title) => panelViewSend(tabId, { type: 'title', title }));
+    // 指针锁兜底(v0.54.21):FPS 游戏的 Pointer Lock 常带"重锁循环"(Esc 一释放立刻再锁,用户被卡死)。
+    // 连按两次 Esc → 注入禁用 shim(覆盖 requestPointerLock 为 no-op)+ 强制 exitPointerLock,该页面本次不再锁定。
+    const escAt = { t: 0 };
+    v.webContents.on('before-input-event', (_e, input) => {
+      if (!input || input.type !== 'keyDown' || input.key !== 'Escape') return;
+      const now = Date.now();
+      if (now - escAt.t > 700) { escAt.t = now; return; } // 第一次 Esc:让 Chromium 原生释放
+      escAt.t = 0;
+      v.webContents.executeJavaScript(`(function () {
+        try {
+          if (HTMLElement.prototype.requestPointerLock.toString().indexOf('native code') !== -1) {
+            HTMLElement.prototype.requestPointerLock = function () { window.__litePtrKilled = true; return undefined; };
+          }
+        } catch (_) {}
+        try { document.exitPointerLock && document.exitPointerLock(); } catch (_) {}
+        window.__litePtrKilled = true;
+        return true;
+      })()`).then((ok) => { if (ok) panelViewSend(tabId, { type: 'ptr-unlocked' }); }).catch(() => {});
+    });
     v.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:/i.test(url)) v.webContents.loadURL(url);
       return { action: 'deny' };
@@ -162,9 +196,26 @@ function register(store) {
     panelViewAttachedId = null;
   };
   ipcMain.handle('panelweb:navigate', (_e, { tabId, url }) => {
-    if (!/^(https?:\/\/|data:)/i.test(String(url))) throw new Error('仅支持 http/https 地址');
+    if (!/^(https?:\/\/|file:\/\/|data:)/i.test(String(url))) throw new Error('仅支持 http/https/file/data 地址');
     const v = panelViewAttach(String(tabId));
     return v.webContents.loadURL(String(url)).then(() => ({ ok: true })).catch((err) => ({ ok: false, error: String(err.message || err) }));
+  });
+  // 打开前预检(v0.54.21):file/data 页面是否用 Pointer Lock —— 四个 HTML 入口统一走这里,命中则渲染端挂提示条
+  ipcMain.handle('panelweb:precheck', (_e, { url }) => {
+    try {
+      const u = String(url || '');
+      let html = '';
+      if (/^file:\/\//i.test(u)) {
+        const p = decodeURIComponent(u.replace(/^file:\/\/\/?/i, '')).split(/[?#]/)[0];
+        const abs = require('path').resolve(p);
+        const st = require('fs').statSync(abs);
+        if (st.isFile() && st.size <= 2 * 1024 * 1024) html = require('fs').readFileSync(abs, 'utf8');
+      } else if (/^data:text\/html/i.test(u)) {
+        const b64 = /base64,(.*)$/i.exec(u);
+        html = b64 ? Buffer.from(b64[1], 'base64').toString('utf8') : decodeURIComponent(u.replace(/^data:text\/html[,;]?/i, ''));
+      }
+      return { lock: /requestPointerLock|pointerLockElement/i.test(html.slice(0, 400000)) };
+    } catch (_) { return { lock: false }; }
   });
   ipcMain.handle('panelweb:setBounds', (_e, { tabId, rect }) => {
     if (!tabId || !rect || rect.width < 1 || rect.height < 1) { panelViewDetachAll(); return; }
@@ -199,12 +250,24 @@ function register(store) {
     const caps = modelCaps.forModel(model, p && p.modelCaps, db);
     // 手动最大上下文最优先(v0.51.0):供应商模型行填了 ctxLimit 就用它,否则查 models.dev 快照
     const manualCtx = p && p.modelCaps && p.modelCaps[model] && Number(p.modelCaps[model].ctxLimit);
-    return { ...caps, contextLimit: manualCtx || modelCaps.contextLimit(model, db) }; // 用量条「上下文已用 x%」分母
+    // 压缩策略窗口(GPT 272K / 按模型预设)与上下文显示统一:新模型不在快照里时也能拿到分母
+    const policy = compressPolicy.resolvePolicy({ settings: store.config, provider: p, model, db });
+    let contextLimit = manualCtx || modelCaps.contextLimit(model, db);
+    if (policy.enabled && policy.window > 0) contextLimit = policy.window;
+    // unknown = 规则与官方库都查无此模型(区别于 style:'none' 的"确认不支持"),渲染端徽章文案分叉
+    return { ...caps, unknown: !caps, contextLimit }; // 用量条「上下文已用 x%」分母
   });
   ipcMain.handle('reason:capsBatch', (e, { models, providerId }) => {
     const p = store.config.providers.find((x) => x.id === providerId);
+    const db = modelCaps.getModelDb(store);
     const out = {};
-    for (const m of models || []) out[m] = modelCaps.forModel(m, p && p.modelCaps, modelCaps.getModelDb(store));
+    for (const m of models || []) {
+      const caps = modelCaps.forModel(m, p && p.modelCaps, db);
+      const policy = compressPolicy.resolvePolicy({ settings: store.config, provider: p, model: m, db });
+      let contextLimit = (p && p.modelCaps && p.modelCaps[m] && Number(p.modelCaps[m].ctxLimit)) || modelCaps.contextLimit(m, db);
+      if (policy.enabled && policy.window > 0) contextLimit = policy.window;
+      out[m] = { ...caps, contextLimit };
+    }
     return out;
   });
 
@@ -214,12 +277,7 @@ function register(store) {
     return { count: (db && db.count) || 0, updatedAt: (db && db.updatedAt) || null, source: (db && db.source) || null };
   });
   ipcMain.handle('modeldb:update', async (e) => {
-    const res = await http.fetch('https://models.dev/api.json', { signal: AbortSignal.timeout(60000) });
-    if (!res.ok) throw new Error('下载失败 HTTP ' + res.status);
-    const raw = await res.json();
-    const db = modelCaps.transformModelDb(raw);
-    fs.writeFileSync(store.baseDir() + '/model-db.json', JSON.stringify(db), 'utf8');
-    store.updateConfig({ modelDbUpdatedAt: db.updatedAt });
+    const db = await modeldb.updateModelDb(store);
     debuglog.info(store, 'modeldb', '能力库已更新', { count: db.count });
     return { ok: true, count: db.count, updatedAt: db.updatedAt };
   });
@@ -303,46 +361,109 @@ function register(store) {
   });
 
   ipcMain.handle('providers:delete', (e, id) => {
-    store.updateConfig({ providers: store.config.providers.filter((p) => p.id !== id) });
+    const p = store.config.providers.find((x) => x.id === id);
+    const patch = { providers: store.config.providers.filter((x) => x.id !== id) };
+    // 删的是预置模板 → 记下,否则下次启动被预置注入重新加回来(v0.57.7)
+    if (p && providers.PRESETS.some((x) => x.id === id)) {
+      patch.removedPresets = [...new Set([...(store.config.removedPresets || []), id])];
+    }
+    store.updateConfig(patch);
     return store.config;
+  });
+
+  // —— 一键清理未使用的服务商模板(v0.57.7)——
+  // 判定:无 Key、无已登录 OAuth,且未被任何入口引用(当前模型 / 子智能体 / 团队队员 / 生图服务商)。
+  // 带 Key、已登录、被引用的一律不碰。dryRun 用于预览确认与按钮计数。
+  const unusedProviderIds = (cfg) => {
+    const refs = new Set();
+    if (cfg.lastModel && cfg.lastModel.providerId) refs.add(cfg.lastModel.providerId);
+    for (const s of cfg.subagents || []) if (s.providerId) refs.add(s.providerId);
+    for (const tm of cfg.teams || []) for (const w of tm.workers || []) if (w.providerId) refs.add(w.providerId);
+    if (cfg.imageGen && cfg.imageGen.providerId) refs.add(cfg.imageGen.providerId);
+    const accounts = cfg.oauthAccounts || {};
+    const norm = (u) => String(u || '').trim().replace(/\/+$/, '').toLowerCase();
+    return (cfg.providers || []).filter((p) => {
+      if (refs.has(p.id)) return false;
+      if (p.oauth) {
+        const acc = accounts[p.oauth];
+        return !(acc && acc.accessToken); // 已登录的保留
+      }
+      const keys = (p.apiKeys || []).length + (p.apiKey ? 1 : 0);
+      if (keys > 0) return false;
+      // 只有「预设模板」或「连 BaseURL 都没填的空条目」才算可清理;
+      // 用户自建/改过 BaseURL 的条目不碰(可能只是还没填 Key)
+      const preset = providers.PRESETS.find((x) => x.id === p.id);
+      if (!preset) return !String(p.baseUrl || '').trim();
+      return norm(p.baseUrl) === norm(preset.baseUrl);
+    }).map((p) => p.id);
+  };
+  ipcMain.handle('providers:cleanupUnused', (e, opts) => {
+    const dry = !!(opts && opts.dryRun);
+    const ids = unusedProviderIds(store.config);
+    const names = ids.map((id) => (store.config.providers.find((p) => p.id === id) || {}).name).filter(Boolean);
+    if (!dry && ids.length) {
+      const del = new Set(ids);
+      const patch = { providers: store.config.providers.filter((p) => !del.has(p.id)) };
+      const presetIds = ids.filter((id) => providers.PRESETS.some((x) => x.id === id));
+      if (presetIds.length) patch.removedPresets = [...new Set([...(store.config.removedPresets || []), ...presetIds])];
+      store.updateConfig(patch);
+    }
+    return { config: store.config, removed: ids, names };
   });
 
   ipcMain.handle('providers:addPreset', (e, presetId) => {
     const preset = providers.PRESETS.find((p) => p.id === presetId);
     if (preset && !store.config.providers.some((p) => p.id === preset.id)) {
       store.config.providers.push({ ...preset, models: [...(preset.models || [])], apiKey: '' });
-      store.updateConfig({ providers: store.config.providers });
+      // 手动重新添加 = 取消删除记录,以后版本升级仍会自动补册
+      const kept = (store.config.removedPresets || []).filter((x) => x !== preset.id);
+      store.updateConfig({ providers: store.config.providers, removedPresets: kept });
     }
     return store.config;
   });
 
-  ipcMain.handle('providers:fetchModels', async (e, id) => {
+  ipcMain.handle('providers:fetchModels', async (e, arg) => {
+    // 兼容两种调用：旧版传 id 字符串 = 直接合并入库；新版传 { id, preview } = 只拉取，供二级窗口勾选
+    const id = typeof arg === 'string' ? arg : (arg && arg.id);
+    const preview = !!(arg && arg.preview);
     const p = store.config.providers.find((x) => x.id === id);
     if (!p) throw new Error('服务商不存在');
     if (!p.baseUrl) throw new Error('请先填写 BaseURL');
     // Gemini OAuth 账号:模型清单走 Cloud Code 专用端点
     if (p.oauth === 'gemini') {
       const models = await oauth.fetchModelsForOauth(store, 'gemini', id);
-      return { models, config: store.config, capsMerged: 0 };
+      return { models, config: store.config, capsMerged: 0, preview };
     }
     const adapter = providers.getAdapter(p.type);
     const guard = (u) => security.assertUrlAllowed(u, store.config.security || {});
     const primaryKey = (p.apiKeys && p.apiKeys[0]) || p.apiKey || '';
     const list = await adapter.listModels(p.baseUrl, primaryKey, guard);
-    p.models = [...new Set([...(p.models || []), ...list])];
-    // 上游推理能力探测(OpenRouter 风格 supported_parameters),失败静默
+    if (!preview) p.models = [...new Set([...(p.models || []), ...list])];
+    // 上游推理能力探测(OpenRouter 风格 supported_parameters),失败静默;
+    // 合并规则:手动逐模型配置(source:'manual')不被覆盖(mergeUpstreamCaps)
     let capsMerged = 0;
     try {
       if (adapter.fetchCaps) {
         const caps = await adapter.fetchCaps(p.baseUrl, primaryKey, guard);
         if (caps && Object.keys(caps).length) {
-          p.modelCaps = { ...(p.modelCaps || {}), ...caps };
+          p.modelCaps = modelCaps.mergeUpstreamCaps(p.modelCaps, caps);
           capsMerged = Object.keys(caps).length;
         }
       }
     } catch (_) { /* 能力探测失败不影响模型列表 */ }
-    store.updateConfig({ providers: store.config.providers });
-    return { models: list, config: store.config, capsMerged };
+    if (!preview) store.updateConfig({ providers: store.config.providers });
+    return { models: list, config: store.config, capsMerged, preview };
+  });
+
+  // 二级窗口勾选后批量入库(v0.57.8):只加选中的模型,并把刚探测到的能力一起落盘
+  ipcMain.handle('providers:addModels', (e, { id, models }) => {
+    const p = store.config.providers.find((x) => x.id === id);
+    if (p) {
+      const add = (models || []).map((m) => String(m || '').trim()).filter(Boolean);
+      p.models = [...new Set([...(p.models || []), ...add])];
+      store.updateConfig({ providers: store.config.providers });
+    }
+    return store.config;
   });
 
   ipcMain.handle('providers:addModel', (e, { id, model }) => {
@@ -571,6 +692,38 @@ function register(store) {
   ipcMain.handle('convs:list', () => store.listConvs());
 
   ipcMain.handle('convs:get', (e, id) => store.getConv(id));
+  // 跨会话全局搜索(v0.54.3):扫全部会话的标题/用户消息/AI 正文/工具结果,每个会话给第一条命中
+  ipcMain.handle('search:global', (e, { q, limit }) => {
+    const query = String(q || '').trim().toLowerCase();
+    if (!query) return { hits: [] };
+    const cap = Math.min(80, Math.max(10, Number(limit) || 40));
+    const hits = [];
+    for (const meta of store.listConvs()) {
+      if (hits.length >= cap) break;
+      let c = null;
+      try { c = store.getConv(meta.id); } catch (_) { continue; }
+      if (!c || !Array.isArray(c.messages)) continue;
+      const titleHit = String(c.title || '').toLowerCase().includes(query);
+      let pushed = false;
+      for (let i = 0; i < c.messages.length && hits.length < cap; i++) {
+        const m = c.messages[i];
+        let text = '';
+        if (m.role === 'user') text = typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? m.content.filter((p) => p && p.type === 'text').map((p) => p.text || '').join(' ') : '');
+        else if (m.role === 'assistant') text = (m.blocks || []).filter((b) => b.type === 'text').map((b) => b.content || '').join('\n');
+        else if (m.role === 'tool') text = String(m.content || '').slice(0, 4000);
+        if (!text) continue;
+        const idx = text.toLowerCase().indexOf(query);
+        if (idx < 0) continue;
+        const pre = idx > 60 ? '…' : '';
+        const post = idx + query.length + 90 < text.length ? '…' : '';
+        const snippet = (pre + text.slice(Math.max(0, idx - 60), idx + query.length + 90)).replace(/\s+/g, ' ').trim();
+        hits.push({ convId: meta.id, title: c.title || '(未命名)', idx, role: m.role, snippet, updatedAt: meta.updatedAt });
+        pushed = true;
+      }
+      if (!pushed && titleHit) hits.push({ convId: meta.id, title: c.title || '(未命名)', idx: -1, role: 'title', snippet: '', updatedAt: meta.updatedAt });
+    }
+    return { hits };
+  });
 
   ipcMain.handle('convs:delete', (e, id) => {
     store.deleteConv(id);
@@ -659,10 +812,10 @@ function register(store) {
     return forked;
   });
 
-  ipcMain.handle('conv:switchBranch', (e, { convId, index, dir }) => {
+  ipcMain.handle('conv:switchBranch', (e, { convId, index, dir, to }) => {
     const conv = store.getConv(convId);
     if (!conv) return null;
-    store.switchBranch(conv, index, dir);
+    store.switchBranch(conv, index, dir, to);
     store.saveConv(conv);
     return conv;
   });
@@ -691,7 +844,9 @@ function register(store) {
   });
 
   // ---- 对话 ----
-  ipcMain.handle('chat:send', (e, payload) => {
+  // 发消息核心(v0.54.0):渲染端 chat:send 与远程控制共用。payload 字段同 chat:send;
+  // deliver 决定每个事件的去向(渲染端 = webContents.send,远程 = SSE 广播)。
+  function chatSendCore(payload, deliver) {
     const { streamId, convId, providerId, model, userText, retry, branch, agentMode, mode, assistantId, skillId, groupId, reasonLevel } = payload || {};
     // 附件:主进程二次校验(数量/大小/类型白名单);非法项的原因透传给渲染端提示
     const norm = attachments.normalizeIncoming(payload && payload.attachments);
@@ -704,13 +859,16 @@ function register(store) {
     }
     const ac = new AbortController();
     streams.set(streamId, { ac, decisions: new Map(), asks: new Map(), convId });
-    const send = (obj) => {
-      if (!e.sender.isDestroyed()) e.sender.send('chat:event', { streamId, convId, ...obj });
-    };
-    runChat({ store, send, streams, streamId, convId, providerId, model, userText, retry, branch, agentMode, mode, assistantId, skillId, groupId, reasonLevel, attachments: norm.attachments, attachWarnings: norm.errors, signal: ac.signal })
-      .catch((err) => send({ type: 'error', message: (err && err.message) || String(err) }))
+    runChat({ store, send: deliver, streams, streamId, convId, providerId, model, userText, retry, branch, agentMode, mode, assistantId, skillId, groupId, reasonLevel, attachments: norm.attachments, attachWarnings: norm.errors, signal: ac.signal })
+      .catch((err) => deliver({ type: 'error', message: (err && err.message) || String(err) }))
       .finally(() => streams.delete(streamId));
-    return { ok: true };
+    return { ok: true, streamId, convId };
+  }
+
+  ipcMain.handle('chat:send', (e, payload) => {
+    return chatSendCore(payload, (obj) => {
+      if (!e.sender.isDestroyed()) e.sender.send('chat:event', { streamId: payload && payload.streamId, convId: payload && payload.convId, ...obj });
+    });
   });
 
   ipcMain.handle('chat:abort', (e, streamId) => {
@@ -737,6 +895,54 @@ function register(store) {
     }
     return { ok: true };
   });
+
+  // ---- 连接桥凭据安全(v0.54.5):密码 safeStorage 加密保存 + SSH 密码登录命令组装(askpass) ----
+  const bridgesMod = require('./bridges');
+  ipcMain.handle('bridge:saveEntry', (e, { kind, entry, password }) => {
+    const k = kind === 'win' ? 'win' : 'ssh';
+    const secure = bridgesMod.secureEntry(entry || {}, password || '');
+    const cur = { ...(store.config.bridges || {}) };
+    cur[k] = [...(cur[k] || []), secure];
+    return store.updateConfig({ bridges: cur });
+  });
+  ipcMain.handle('bridge:connect', (e, p) => bridgesMod.buildConnectCommand(p || {}, (store.config.dev && store.config.dev.terminalShell) || 'powershell'));
+  // 退出清理 askpass 残留脚本(与 terminal.dispose 同批)
+  process.on('exit', () => { try { bridgesMod.cleanupAskpass(); } catch (_) {} });
+
+  // ---- 自动任务(v0.54.13):cron 调度,任务到点自动发起对话 ----
+  const cron = require('./cron');
+  // 开发者选项 UA 覆盖(v0.54.14):全部出站请求(适配器/web_fetch/MCP/搜索)统一注入,getter 动态读配置即时生效
+  http.setUserAgentGetter(() => (store.config.dev && store.config.dev.userAgent) || '');
+  ipcMain.handle('cron:list', () => cron.list(store).map((x) => ({ ...x })));
+  ipcMain.handle('cron:upsert', (e, task) => cron.upsert(store, task || {}));
+  ipcMain.handle('cron:delete', (e, id) => { cron.remove(store, id); return { ok: true }; });
+  ipcMain.handle('cron:runNow', (e, id) => {
+    const task = cron.list(store).find((x) => x.id === id);
+    if (!task) throw new Error('任务不存在');
+    cron.fire(store, { chatSendCore }, task, Date.now());
+    return { ok: true };
+  });
+  try {
+    cron.start(store, { chatSendCore, onFire: (task) => debuglog.info(store, 'cron', 'auto-fire', { id: task.id, name: task.name }) });
+  } catch (err) { debuglog.warn(store, 'cron', 'start-fail', { message: String(err && err.message || err).slice(0, 200) }); }
+
+  // ---- Blender 建模工具链(v0.55.0):状态/测试/一键拉起/停止 + 选中桥广播 + boot 应用 ----
+  blender.setBroadcaster((obj) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      try { w.webContents.send('blender:event', obj); } catch (_) { /* 窗口可能已销毁 */ }
+    }
+  });
+  ipcMain.handle('blender:status', () => blender.status(store));
+  ipcMain.handle('blender:test', async () => blender.test(store));
+  ipcMain.handle('blender:launch', async (e, p) => blender.launch(store, p && p.file));
+  ipcMain.handle('blender:stop', async () => blender.stop(store));
+  // 视口面板数据面(v0.55.0:右侧面板「Blender 视口」标签):host 只读代理 / 点击选物 / 插入输入框
+  ipcMain.handle('blender:host', (e, p) => blender.hostGet(store, p && p.path));
+  ipcMain.handle('blender:insert', (e, p) => ({ ok: blender.insertText(p && p.text) }));
+  ipcMain.handle('blender:pick', (e, p) => blender.pickAt(store, p && p.x, p && p.y));
+  try {
+    blender.applyConfig(store); // 已启用则 boot 即拉起后端 + 看护 + 选中桥(未启用为无操作)
+  } catch (err) { debuglog.warn(store, 'blender', 'boot-apply-fail', { message: String(err && err.message || err).slice(0, 200) }); }
 
   // ---- DSH 插件兼容 ----
   ipcMain.handle('dsh:list', () => dsh.listInstalled(store.pluginsDir()));
@@ -814,6 +1020,29 @@ function register(store) {
   console.error('[IPC] specialty done');
   try { dshHost.ensure(store); } catch (e) { debuglog.error(store, 'dsh-host', 'ensure-fail', { message: String(e && e.message || e).slice(0, 300) }); }
   console.error('[IPC] register complete');
+
+  // 远程控制(v0.54.0):配置已开启时开机自启;此后 config:set { remote } 实时启停(见 config:set 处理器)
+  try { require('./remote').applyConfig(store.config, { store, streams, chatSendCore }); } catch (e) { debuglog.warn(store, 'remote', 'boot-fail', { message: String(e && e.message || e).slice(0, 200) }); }
+
+  // 远程隧道(v0.54.0):状态读取 + 动作(下载二进制 / 立即重启隧道)
+  const tunnels = require('./tunnels');
+  ipcMain.handle('remote:tunnel-status', () => tunnels.status());
+  ipcMain.handle('remote:tunnel-action', async (e, payload) => {
+    const action = payload && payload.action;
+    try {
+      if (action === 'download') {
+        const exe = await tunnels.download(payload.mode === 'easytier' ? 'easytier' : 'frp', store);
+        return { ok: true, path: exe };
+      }
+      if (action === 'restart') {
+        require('./remote').applyConfig(store.config, { store, streams, chatSendCore });
+        return { ok: true };
+      }
+      return { ok: false, error: 'unknown-action' };
+    } catch (err) {
+      return { ok: false, error: String(err.message || err).slice(0, 300) };
+    }
+  });
 }
 
 module.exports = { register };

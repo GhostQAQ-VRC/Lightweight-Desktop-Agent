@@ -1,0 +1,30 @@
+{
+  "name": "lite-agent",
+  "productName": "LiteAgent 桌面智能体",
+  "version": "0.57.9",
+  "description": "桌面端 AI Agent:右侧面板(辅助对话/审查/终端/浏览器) + 供应商账号登录(OAuth) + 用量洞察仪表盘 + 团队协同(多模型编队) + 子智能体库(多模型协作) + 对话内搜索 + 对话分支 + 沙箱安全 + 联网搜索 + 多模型(models.dev 能力库)+ 推理强度 + 多智能体并行 + 图片/文件上传 + 网络代理 + 多会话并发 + 原生插件 SDK + 技能专精 + 决策问询 + 安全审计",
+  "main": "main.js",
+  "scripts": {
+    "postinstall": "node scripts/vendor.js",
+    "start": "electron .",
+    "dist": "node scripts/dist.js",
+    "dist:clean": "node scripts/clean-dist.js",
+    "audit:i18n": "node scripts/audit-i18n.js",
+    "check:imports": "node scripts/check-imports.js",
+    "check:imports:strict": "node scripts/check-imports.js --strict",
+    "log:new": "node scripts/worklog.js new",
+    "log:close": "node scripts/worklog.js close",
+    "log:list": "node scripts/worklog.js list"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "dompurify": "^3.1.6",
+    "electron": "^33.0.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.23.1",
+    "highlight.js": "^11.10.0",
+    "marked": "^12.0.2"
+  },
+  "dependencies": {}
+}

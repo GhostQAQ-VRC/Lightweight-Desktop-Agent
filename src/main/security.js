@@ -18,11 +18,15 @@ const SENSITIVE_PATTERNS = [
 const isLocalHost = (host) =>
   ['localhost', '127.0.0.1', '::1'].includes(host) || host.endsWith('.localhost') || host.endsWith('.local');
 
-// 请求门槛:HTTPS 强制(本地豁免)+ 域名白名单。违规直接抛错中断请求。
+// 请求门槛:协议白名单(仅 http/https,file:///ftp:///javascript: 等一律拒)+ HTTPS 强制(本地豁免)+ 域名白名单。
+// 违规直接抛错中断请求。
 function assertUrlAllowed(url, security) {
   const sec = security || {};
   let u;
-  try { u = new URL(url); } catch (_) { throw new Error(`无效的请求地址: ${url}`); }
+  try { u = new URL(url); } catch { throw new Error(`无效的请求地址: ${url}`); }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+    throw new Error(`已拦截非 http/https 协议请求: ${u.protocol}(file/ftp 等协议不在允许范围)`);
+  }
   const host = u.hostname.toLowerCase();
   const local = isLocalHost(host);
 
@@ -58,12 +62,12 @@ function filterMessages(messages, security) {
   };
 
   const out = messages.map((m) => {
+    let nm = m;
     if (typeof m.content === 'string') {
       const c = transform(m.content);
-      return c === m.content ? m : { ...m, content: c };
-    }
-    // 多模态数组(附件消息):扫描/脱敏 text part;图片等非文本 part 原样保留
-    if (Array.isArray(m.content)) {
+      if (c !== m.content) nm = { ...m, content: c };
+    } else if (Array.isArray(m.content)) {
+      // 多模态数组(附件消息):扫描/脱敏 text part;图片等非文本 part 原样保留
       let changed = false;
       const parts = m.content.map((p) => {
         if (p && p.type === 'text' && typeof p.text === 'string') {
@@ -72,9 +76,22 @@ function filterMessages(messages, security) {
         }
         return p;
       });
-      return changed ? { ...m, content: parts } : m;
+      if (changed) nm = { ...m, content: parts };
     }
-    return m;
+    // 工具调用参数同样出站(上一轮 assistant 的 tool_calls 会原样回传 API):
+    // write_file 内容等参数里的密钥若不扫描,敏感扫描形同虚设(攻防审计2 S6 锚定)
+    if (Array.isArray(m.tool_calls)) {
+      let tcChanged = false;
+      const tool_calls = m.tool_calls.map((tc) => {
+        if (tc && typeof tc.arguments === 'string') {
+          const a = transform(tc.arguments);
+          if (a !== tc.arguments) { tcChanged = true; return { ...tc, arguments: a }; }
+        }
+        return tc;
+      });
+      if (tcChanged) nm = { ...nm, tool_calls };
+    }
+    return nm;
   });
   return { messages: out, findings };
 }

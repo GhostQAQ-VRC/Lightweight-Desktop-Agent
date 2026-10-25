@@ -16,7 +16,10 @@ function normalizeBase(raw) {
   return base.replace(/\/+$/, '') + '/v1';
 }
 
-function toOpenaiMessages(messages, system) {
+function toOpenaiMessages(messages, system, reasoning) {
+  // DeepSeek V4 系(thinking_effort)带 tools 时官方要求完整回传 reasoning_content,否则 400;
+  // 其他模型不发(内部字段 _reasoning 只在此按需转正,避免严格服务商拒收未知字段)
+  const passReasoning = reasoning && reasoning.style === 'thinking_effort';
   const out = [];
   if (system) out.push({ role: 'system', content: system });
   for (const m of messages) {
@@ -24,6 +27,7 @@ function toOpenaiMessages(messages, system) {
       out.push({ role: 'user', content: m.content });
     } else if (m.role === 'assistant') {
       const msg = { role: 'assistant', content: m.content || null };
+      if (passReasoning && typeof m._reasoning === 'string' && m._reasoning) msg.reasoning_content = m._reasoning;
       if (m.tool_calls && m.tool_calls.length) {
         msg.tool_calls = m.tool_calls.map((tc) => ({
           id: tc.id,
@@ -60,7 +64,7 @@ async function streamChat(p) {
 
   const body = {
     model: p.model,
-    messages: toOpenaiMessages(p.messages, p.system),
+    messages: toOpenaiMessages(p.messages, p.system, p.reasoning),
     stream: true,
   };
   if (p.temperature !== undefined && p.temperature !== null) body.temperature = p.temperature;

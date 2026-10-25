@@ -19,6 +19,24 @@ function wrapWindowsCmd(command, args) {
   return { cmd: command, argv: args };
 }
 
+// 命令行智能拆分:启动命令字段允许填「整条命令行」(UI placeholder 即此指引,npx -y @scope/server 形态)
+// 或纯程序名。引号感知(含空格路径);拆出的参数与「参数」框里的显式 args 拼接。
+// 没有这一层时整行会被当成程序名 → spawn ENOENT → MCP「无法使用」(2026-10-25 复现锚定)。
+function splitCommandLine(line) {
+  const out = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(String(line || '')))) out.push(m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[3]));
+  return out;
+}
+
+function expandCommand(command, args) {
+  const parts = splitCommandLine(command);
+  if (!parts.length) return { cmd: '', argv: args || [] };
+  if (parts.length === 1) return { cmd: parts[0], argv: args || [] };
+  return { cmd: parts[0], argv: [...parts.slice(1), ...(args || [])] };
+}
+
 /* ---------------- stdio 传输(换行分隔 JSON-RPC) ---------------- */
 class StdioTransport {
   constructor(cfg) {
@@ -32,7 +50,8 @@ class StdioTransport {
   }
 
   start() {
-    const { cmd, argv } = wrapWindowsCmd(this.cfg.command, this.cfg.args || []);
+    const expanded = expandCommand(this.cfg.command, this.cfg.args || []);
+    const { cmd, argv } = wrapWindowsCmd(expanded.cmd, expanded.argv);
     this.proc = spawn(cmd, argv, {
       env: { ...process.env, ...(this.cfg.env || {}) },
       cwd: this.cfg.cwd || undefined,
@@ -84,7 +103,7 @@ class StdioTransport {
   }
 
   write(obj) {
-    this.proc.stdin.write(JSON.stringify(obj) + '\n');
+    try { this.proc.stdin.write(JSON.stringify(obj) + '\n'); } catch (_) { /* 进程已退出:由 exit/error 事件统一 reject */ }
   }
 
   request(method, params, timeoutMs = 20000, signal) {
@@ -365,4 +384,4 @@ async function testServer(cfg) {
   }
 }
 
-module.exports = { collectTools, callTool, routeInfo, invalidate, testServer };
+module.exports = { collectTools, callTool, routeInfo, invalidate, testServer, expandCommand, splitCommandLine };

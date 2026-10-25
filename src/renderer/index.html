@@ -20,14 +20,59 @@
     <!-- 侧边栏 -->
     <aside id="sidebar">
       <div class="side-head">
-        <div class="logo"><span class="logo-mark">L</span>LiteAgent</div>
-        <button id="btn-new" class="btn-new" data-i18n-title="新建对话 (Ctrl+N)" title="新建对话 (Ctrl+N)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-          <span data-i18n="新对话">新对话</span>
+        <div class="logo"><span class="logo-mark"><svg viewBox="0 0 512 512" width="24" height="24" aria-label="LiteAgent"><rect width="512" height="512" rx="112" fill="#101418"/><rect x="84" y="112" width="344" height="240" rx="28" fill="none" stroke="#22d3ee" stroke-width="18"/><line x1="84" y1="164" x2="428" y2="164" stroke="#22d3ee" stroke-width="10" opacity=".5"/><circle cx="112" cy="138" r="7" fill="#22d3ee" opacity=".7"/><polyline points="150,216 218,260 150,304" fill="none" stroke="#e8e8ec" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/><line x1="244" y1="310" x2="330" y2="310" stroke="#e8e8ec" stroke-width="22" stroke-linecap="round"/><line x1="256" y1="352" x2="256" y2="392" stroke="#22d3ee" stroke-width="16" stroke-linecap="round"/><line x1="196" y1="400" x2="316" y2="400" stroke="#22d3ee" stroke-width="16" stroke-linecap="round"/></svg></span>LiteAgent</div>
+        <nav class="side-menu">
+          <button id="btn-new" class="sm-item" data-i18n-title="新建任务 (Ctrl+N)" title="新建任务 (Ctrl+N)">
+            <svg class="sm-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            <span data-i18n="新建任务">新建任务</span>
+            <kbd class="sm-kbd">Ctrl+N</kbd>
+          </button>
+          <button id="sm-search" class="sm-item" data-i18n-title="搜索 (Ctrl+F)" title="搜索 (Ctrl+F)">
+            <svg class="sm-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <span data-i18n="搜索">搜索</span>
+            <kbd class="sm-kbd">Ctrl+F</kbd>
+          </button>
+          <button id="sm-bridge" class="sm-item" data-i18n-title="连接桥(MCP / SSH / Windows)" title="连接桥(MCP / SSH / Windows)">
+            <svg class="sm-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span data-i18n="连接桥">连接桥</span>
+          </button>
+          <button id="sm-spec" class="sm-item" data-i18n-title="技能知识库(专精包:领域知识 + 人设路由)" title="技能知识库(专精包:领域知识 + 人设路由)">
+            <svg class="sm-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            <span data-i18n="技能知识库">技能知识库</span>
+          </button>
+          <button id="sm-cron" class="sm-item" data-i18n-title="自动任务(定时让 AI 执行:每天/每周/每隔 N 分钟)" title="自动任务(定时让 AI 执行:每天/每周/每隔 N 分钟)">
+            <svg class="sm-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+            <span data-i18n="自动任务">自动任务</span>
+          </button>
+          <div class="sm-sep"></div>
+          <button id="sm-lite" class="sm-item" data-i18n-title="进入精简模式(终端形态的完整智能体)" title="进入精简模式(终端形态的完整智能体)">
+            <svg class="sm-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>
+            <span data-i18n="进入精简模式">进入精简模式</span>
+          </button>
+        </nav>
+      </div>
+      <div class="side-listhead">
+        <span class="slh-title" data-i18n="任务列表">任务列表</span>
+        <span class="spacer"></span>
+        <button id="btn-conv-filter" class="slh-btn" data-i18n-title="搜索会话" title="搜索会话">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
         </button>
+        <button id="btn-gsearch" class="slh-btn" data-i18n-title="全局搜索全部对话 (Ctrl+Shift+F)" title="全局搜索全部对话 (Ctrl+Shift+F)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6M11 8v6"/></svg>
+        </button>
+        <button id="btn-conv-view" class="slh-btn" data-i18n-title="分类方式" title="分类方式">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>
+        </button>
+      </div>
+      <div id="conv-filter-row" class="hidden">
+        <input id="conv-filter" type="text" data-i18n-ph="过滤会话标题…" placeholder="过滤会话标题…" spellcheck="false">
       </div>
       <div id="conv-list"></div>
       <div class="side-foot">
+        <button id="btn-remote" class="side-btn" data-i18n-title="远程控制(手机 / 平板)" title="远程控制(手机 / 平板)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+          <span data-i18n="远程">远程</span>
+        </button>
         <button id="btn-settings" class="side-btn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span data-i18n="设置">设置</span>
@@ -38,8 +83,24 @@
     <!-- 主区 -->
     <main id="main">
       <header id="topbar">
+        <button id="btn-sidebar-toggle" class="ghost-btn" data-i18n-title="隐藏 / 显示侧栏" title="隐藏 / 显示侧栏">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+        </button>
         <select id="assistant-select" data-i18n-title="当前助手(角色提示词)" title="当前助手(角色提示词)"></select>
         <select id="mode-select" data-i18n-title="智能体模式:对话 / 受限 / 完全 / 创造" title="智能体模式:对话 / 受限 / 完全 / 创造"></select>
+        <!-- 顶栏中部:本对话的子智能体入口(v0.55.4) -->
+        <div id="subagent-combo">
+          <button id="subagent-pill" class="ghost-btn" data-i18n-title="子智能体(本对话派发的运行状态)" title="子智能体(本对话派发的运行状态)">
+            <span class="sa-pill-ico">🤖</span>
+            <span class="sa-pill-label" data-i18n="子智能体">子智能体</span>
+            <b id="subagent-count" class="hidden">0</b>
+            <i id="subagent-dot" class="hidden"></i>
+          </button>
+          <div id="subagent-pop" class="hidden">
+            <div class="sa-pop-head"><span data-i18n="子智能体">子智能体</span><span id="subagent-sum" class="sa-pop-sum"></span></div>
+            <div id="subagent-run-list"></div>
+          </div>
+        </div>
         <div class="spacer"></div>
         <button id="btn-search" class="ghost-btn" data-i18n-title="在当前对话中搜索 (Ctrl+F)" data-i18n="🔍 搜索" title="在当前对话中搜索 (Ctrl+F)">🔍 搜索</button>
         <button id="btn-export" class="ghost-btn" data-i18n-title="导出当前对话为 Markdown" data-i18n="导出" title="导出当前对话为 Markdown">导出</button>
@@ -51,34 +112,66 @@
       <footer id="composer">
         <div id="skill-bar"></div>
         <div class="composer-box">
-          <div class="composer-head" id="composer-head">
-            <span id="composer-mini" class="composer-mini" data-i18n-title="点击展开" title="点击展开"></span>
-            <div id="composer-full" class="composer-full">
-              <div id="model-combo" data-i18n-title="选择模型(可搜索)" title="选择模型(可搜索)">
-                <button id="mc-btn" type="button"><span class="mc-ico">◆</span><span id="mc-label">未选择模型</span><span class="mc-caret">▾</span></button>
-                <div id="mc-pop" class="hidden">
-                  <div class="mc-search-row">
-                    <input id="mc-search" type="text" data-i18n-ph="搜索模型 ID / 供应商…" placeholder="搜索模型 ID / 供应商…" spellcheck="false">
-                    <span class="mc-count" id="mc-count"></span>
-                  </div>
-                  <div id="mc-list"></div>
-                </div>
-              </div>
-              <div class="spacer"></div>
-            </div>
-            <button id="composer-fold" class="fold-btn" data-i18n-title="折叠/展开模型与技能栏" title="折叠/展开模型与技能栏">▾</button>
-          </div>
-          <div id="composer-reason" class="reason-row">
-            <span class="rs-badge2" data-i18n="🧠 思考">🧠 思考</span>
-            <div id="reason-slider" data-none="1" data-i18n-title="推理强度(按所选模型能力自动识别)" title="推理强度(按所选模型能力自动识别)"></div>
-          </div>
           <div id="attach-bar" class="hidden"></div>
           <textarea id="input" rows="1" data-i18n-ph="给 LiteAgent 发送消息…(Enter 发送,Shift+Enter 换行;可拖入或粘贴图片/文本文件)" placeholder="给 LiteAgent 发送消息…(Enter 发送,Shift+Enter 换行;可拖入或粘贴图片/文本文件)" spellcheck="false"></textarea>
           <div class="composer-foot">
             <button id="btn-attach" class="attach-btn" data-i18n-title="添加图片或文本文件(也可直接拖入窗口或粘贴)" title="添加图片或文本文件(也可直接拖入窗口或粘贴)">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
             </button>
+            <div id="perm-combo">
+              <button id="perm-pill" type="button" title="权限档位:控制工具执行前是否需要确认">
+                <span id="perm-ico">🛡️</span>
+                <span id="perm-label">自主模式</span>
+                <span class="mc-caret">⌄</span>
+              </button>
+              <div id="perm-pop" class="hidden"></div>
+            </div>
             <div class="spacer"></div>
+            <div id="model-combo" data-i18n-title="选择模型(可搜索)" title="选择模型(可搜索)">
+              <button id="mc-btn" type="button">
+                <span class="mc-dot" id="mc-dot"></span>
+                <span id="mc-label">未选择模型</span>
+                <span id="mc-level" class="mc-level">—</span>
+                <span class="mc-caret">⌄</span>
+              </button>
+              <div id="mc-pop" class="hidden">
+                <button id="mp-prov-btn" type="button" title="切换供应商">
+                  <span class="mp-prov-ico">◆</span>
+                  <span id="mp-prov-name">—</span>
+                  <span id="mp-prov-tag" class="mp-tag">API</span>
+                  <span class="mc-caret">›</span>
+                </button>
+                <div id="mp-prov-list" class="hidden">
+                  <div id="mp-prov-items"></div>
+                  <button id="mp-manage" type="button" data-i18n="管理模型">管理模型</button>
+                </div>
+                <div id="mp-model-area">
+                  <div class="mp-section" data-i18n="模型">模型</div>
+                  <div class="mc-search-row">
+                    <input id="mc-search" type="text" data-i18n-ph="搜索模型…" placeholder="搜索模型…" spellcheck="false">
+                    <span class="mc-count" id="mc-count"></span>
+                  </div>
+                  <div id="mc-list"></div>
+                </div>
+                <div class="mp-section mp-reason-head">
+                  <span data-i18n="思考强度">思考强度</span>
+                  <b id="mc-rlevel">—</b>
+                </div>
+                <div id="reason-slider" data-none="1" data-i18n-title="推理强度(按所选模型能力自动识别)" title="推理强度(按所选模型能力自动识别)"></div>
+              </div>
+              <div id="mp-pop2" class="hidden">
+                <div id="mp2-right">
+                  <div class="mp-section">供应商</div>
+                  <div id="mp2-provs"></div>
+                  <button id="mp2-manage" type="button" data-i18n="管理模型">管理模型</button>
+                </div>
+                <div id="mp2-left">
+                  <div id="mp2-models"></div>
+                  <div class="mp-section mp-reason-head"><span data-i18n="思考强度">思考强度</span><b id="mp2-rlevel">—</b></div>
+                  <div id="mp2-slider-host"></div>
+                </div>
+              </div>
+            </div>
             <button id="btn-send" title="发送"></button>
           </div>
         </div>
@@ -90,6 +183,8 @@
 
   <!-- 设置弹窗挂载点 -->
   <div id="modal-root" class="hidden"></div>
+  <!-- 连接桥独立页(v0.52.0):左侧停靠抽屉形态,独立于设置 -->
+  <div id="bridge-root" class="hidden"></div>
   <div id="toast"></div>
 
   <script src="vendor/marked.min.js"></script>

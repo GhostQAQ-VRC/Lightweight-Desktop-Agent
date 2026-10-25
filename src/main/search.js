@@ -1,4 +1,5 @@
-// 联网搜索:多后端聚合 —— DuckDuckGo(免 Key)/ Tavily / Brave / SearXNG / 博查(中文)。
+// 联网搜索:多后端聚合 —— DuckDuckGo(免 Key)/ Tavily / Brave / SearXNG / 博查(中文)
+//   + 智谱 / Serper / SerpAPI / Google PSE / Jina(免 Key) / Exa(2026-10-25 扩充,共 11 后端)。
 // 模型通过 web_search 工具调用;所有出站走 http.js(受代理设置约束)并过安全 URL 门槛。
 // 解析函数保持纯函数(不触网络),可被测试直接加载。
 const security = require('./security');
@@ -11,6 +12,12 @@ const BACKENDS = {
   brave: { label: 'Brave Search(需 API Key)', needsKey: true, keyField: 'braveKey' },
   searxng: { label: 'SearXNG(自建/公共实例)', needsKey: false, urlField: 'searxUrl' },
   bocha: { label: '博查 Bocha(中文搜索,需 Key)', needsKey: true, keyField: 'bochaKey' },
+  zhipu: { label: '智谱搜索(中文,需 Key)', needsKey: true, keyField: 'zhipuKey' },
+  serper: { label: 'Serper.dev(Google 系,需 Key)', needsKey: true, keyField: 'serperKey' },
+  serpapi: { label: 'SerpAPI(Google 系,需 Key)', needsKey: true, keyField: 'serpapiKey' },
+  google: { label: 'Google 可编程搜索(需 Key + 搜索引擎 ID)', needsKey: true, keyField: 'googleKey', extraFields: ['googleCx'] },
+  jina: { label: 'Jina AI(免 Key,限流)', needsKey: false },
+  exa: { label: 'Exa(面向智能体,需 Key)', needsKey: true, keyField: 'exaKey' },
 };
 
 const decodeEntities = (s) => String(s || '')
@@ -70,6 +77,66 @@ function parseBocha(j) {
   return pages.slice(0, 10)
     .map((r) => ({ title: String(r.name || '').trim(), url: String(r.url || ''), snippet: String(r.snippet || r.summary || '').slice(0, 300) }))
     .filter((r) => r.title && r.url);
+}
+
+// —— 2026-10-25 扩充后端解析(纯函数) ——
+function parseZhipu(j) {
+  return (j && Array.isArray(j.search_result) ? j.search_result : []).slice(0, 10)
+    .map((r) => ({ title: String(r.title || '').trim(), url: String(r.link || r.url || ''), snippet: String(r.content || '').slice(0, 300) }))
+    .filter((r) => r.title && r.url);
+}
+
+function parseSerper(j) {
+  return (j && Array.isArray(j.organic) ? j.organic : []).slice(0, 10)
+    .map((r) => ({ title: String(r.title || '').trim(), url: String(r.link || ''), snippet: String(r.snippet || '').slice(0, 300) }))
+    .filter((r) => r.title && r.url);
+}
+
+function parseSerpapi(j) {
+  return (j && Array.isArray(j.organic_results) ? j.organic_results : []).slice(0, 10)
+    .map((r) => ({ title: String(r.title || '').trim(), url: String(r.link || ''), snippet: String(r.snippet || '').slice(0, 300) }))
+    .filter((r) => r.title && r.url);
+}
+
+function parseGooglePse(j) {
+  return (j && Array.isArray(j.items) ? j.items : []).slice(0, 10)
+    .map((r) => ({ title: String(r.title || '').trim(), url: String(r.link || ''), snippet: String(r.snippet || '').slice(0, 300) }))
+    .filter((r) => r.title && r.url);
+}
+
+function parseExa(j) {
+  return (j && Array.isArray(j.results) ? j.results : []).slice(0, 10)
+    .map((r) => ({ title: String(r.title || '').trim(), url: String(r.url || ''), snippet: String(r.text || '').slice(0, 300) }))
+    .filter((r) => r.title && r.url);
+}
+
+// Jina s.jina.ai/<query> 返回 Markdown SERP。宽松解析:抓 markdown 链接 + "Title:/URL Source:" 行对,
+// 排除 jina 自身与 data URL;两条来源命中同一 URL 去重。格式变化时最多解析为空(诚实"无结果"),不误报。
+function parseJinaMarkdown(md) {
+  const out = [];
+  const seen = new Set();
+  const push = (title, url, snippet) => {
+    if (!title || !/^https?:\/\//i.test(url)) return;
+    if (/jina\.ai|^data:/i.test(url) || seen.has(url)) return;
+    seen.add(url);
+    out.push({ title: stripTags(title).slice(0, 200), url, snippet: stripTags(snippet || '').slice(0, 300) });
+  };
+  const lines = String(md || '').split(/\r?\n/);
+  for (let i = 0; i < lines.length && out.length < 10; i++) {
+    const urlSrc = /^URL Source:\s*(\S+)/i.exec(lines[i]);
+    if (urlSrc) {
+      const title = /^Title:\s*(.+)$/i.exec(lines[i - 1] || '') || /^#*\s*(.+)$/.exec(lines[i + 1] || '');
+      push(title ? title[1] : urlSrc[1], urlSrc[1], lines[i + 1] || '');
+      continue;
+    }
+    // matchAll 独立迭代,不复用 lastIndex —— exec+replace 共用同一全局正则会重置 lastIndex
+    // 造成 exec 永远重复首个匹配,被排除项不增长 out 即同步死循环(事件循环冻结,看门狗都失灵)
+    for (const m of lines[i].matchAll(/\[([^\]\n]{2,200})\]\((https?:\/\/[^\s)]+)\)/g)) {
+      if (out.length >= 10) break;
+      push(m[1], m[2], lines[i]);
+    }
+  }
+  return out;
 }
 
 function formatResults(query, backendLabel, results) {
@@ -153,10 +220,70 @@ async function webSearchExec(args, ctx) {
     const j = await res.json().catch(() => null);
     if (!res.ok) throw new Error(`博查搜索失败 HTTP ${res.status}`);
     results = parseBocha(j);
+  } else if (backend === 'zhipu') {
+    if (!sc.zhipuKey) throw new Error('未配置智谱 API Key(设置 → 沙箱与搜索;open.bigmodel.cn 申请)');
+    security.assertUrlAllowed('https://open.bigmodel.cn/api/paas/v4/web-search', sec);
+    const res = await fetchWithTimeout('https://open.bigmodel.cn/api/paas/v4/web-search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${sc.zhipuKey}` },
+      body: JSON.stringify({ query, count }),
+    }, 20000, signal);
+    const j = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(`智谱搜索失败 HTTP ${res.status}: ${(j && j.error && j.error.message) || ''}`.trim());
+    results = parseZhipu(j);
+  } else if (backend === 'serper') {
+    if (!sc.serperKey) throw new Error('未配置 Serper API Key(设置 → 沙箱与搜索;serper.dev 免费 2500 次/月)');
+    security.assertUrlAllowed('https://google.serper.dev/search', sec);
+    const res = await fetchWithTimeout('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': sc.serperKey },
+      body: JSON.stringify({ q: query, num: count }),
+    }, 20000, signal);
+    const j = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(`Serper 搜索失败 HTTP ${res.status}`);
+    results = parseSerper(j);
+  } else if (backend === 'serpapi') {
+    if (!sc.serpapiKey) throw new Error('未配置 SerpAPI Key(设置 → 沙箱与搜索;serpapi.com 免费档 100 次/月)');
+    security.assertUrlAllowed('https://serpapi.com/search', sec);
+    const url = `https://serpapi.com/search?q=${encodeURIComponent(query)}&num=${count}&api_key=${encodeURIComponent(sc.serpapiKey)}`;
+    const res = await fetchWithTimeout(url, {}, 20000, signal);
+    const j = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(`SerpAPI 搜索失败 HTTP ${res.status}`);
+    results = parseSerpapi(j);
+  } else if (backend === 'google') {
+    if (!sc.googleKey) throw new Error('未配置 Google API Key(设置 → 沙箱与搜索;programmablesearchengine.google.com 创建搜索引擎并获得 ID)');
+    if (!sc.googleCx) throw new Error('未配置 Google 搜索引擎 ID(cx;设置 → 沙箱与搜索)');
+    security.assertUrlAllowed('https://www.googleapis.com/customsearch/v1', sec);
+    const url = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(sc.googleKey)}&cx=${encodeURIComponent(sc.googleCx)}&q=${encodeURIComponent(query)}&num=${Math.min(10, count)}`;
+    const res = await fetchWithTimeout(url, {}, 20000, signal);
+    const j = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(`Google 搜索失败 HTTP ${res.status}: ${(j && j.error && j.error.message) || ''}`.trim());
+    results = parseGooglePse(j);
+  } else if (backend === 'jina') {
+    // 免 Key(限流 ~20 次/分);带 Key 可提额:在下方 Key 框填 Bearer 令牌即自动携带
+    const url = `https://s.jina.ai/${encodeURIComponent(query)}`;
+    security.assertUrlAllowed('https://s.jina.ai/', sec);
+    const headers = { accept: 'text/plain' };
+    if (sc.jinaKey) headers.authorization = `Bearer ${sc.jinaKey}`;
+    const res = await fetchWithTimeout(url, { headers }, 25000, signal);
+    if (!res.ok) throw new Error(`Jina 搜索失败 HTTP ${res.status}(免 Key 有速率限制,可稍后再试或配置 Key)`);
+    results = parseJinaMarkdown(await res.text());
+  } else if (backend === 'exa') {
+    if (!sc.exaKey) throw new Error('未配置 Exa API Key(设置 → 沙箱与搜索;exa.ai 免费额度)');
+    security.assertUrlAllowed('https://api.exa.ai/search', sec);
+    const res = await fetchWithTimeout('https://api.exa.ai/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': sc.exaKey },
+      body: JSON.stringify({ query, numResults: count, contents: { text: { maxCharacters: 300 } } }),
+    }, 25000, signal);
+    const j = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(`Exa 搜索失败 HTTP ${res.status}`);
+    results = parseExa(j);
   }
   return formatResults(query, label, results);
 }
 
 module.exports = {
   BACKENDS, parseDuckduckgoHtml, parseTavily, parseBrave, parseSearxng, parseBocha, formatResults, webSearchExec,
+  parseZhipu, parseSerper, parseSerpapi, parseGooglePse, parseJinaMarkdown, parseExa,
 };
